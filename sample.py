@@ -89,7 +89,7 @@ def sample(ckpt, delta_ckpt, from_file, prompt, compress, batch_size, outdir, nu
         print(f"Generating for prompt: {p}")
         
         # Generate batch
-        images = pipe([p]*batch_size, num_inference_steps, guidance_scale, eta, generator=generator).images
+        images = pipe([p]*batch_size, num_inference_steps=num_inference_steps, guidance_scale=guidance_scale, eta=eta, generator=generator).images
         
         # Stitching (Panel View)
         images_stitched = np.hstack([np.array(x) for x in images])
