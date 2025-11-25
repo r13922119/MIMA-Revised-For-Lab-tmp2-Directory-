@@ -376,6 +376,13 @@ def parse_args():
         default=4,
         help=("The dimension of the LoRA update matrices."),
     )
+    # [FIX] 
+    parser.add_argument(
+        "--train_text_encoder",
+        action="store_true",
+        help="Whether to train the text encoder. If set, the text encoder should be float32 precision.",
+    )
+    # [END OF FIX] 
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -499,13 +506,15 @@ def main():
 
 
 
-    # # Add adapter and make sure the trainable params are in float32.
-    # unet.add_adapter(unet_lora_config)
-    # if args.mixed_precision == "fp16":
-    #     for param in unet.parameters():
-    #         # only upcast trainable parameters (LoRA) into fp32
-    #         if param.requires_grad:
-    #             param.data = param.to(torch.float32)
+    # [FIX] UNCOMMENT THIS BLOCK
+    # Add adapter and make sure the trainable params are in float32.
+    unet.add_adapter(unet_lora_config)
+    if args.mixed_precision == "fp16":
+        for param in unet.parameters():
+            # only upcast trainable parameters (LoRA) into fp32
+            if param.requires_grad:
+                param.data = param.to(torch.float32)
+    # [END OF FIX] UNCOMMENT THIS BLOCK
 
     # if args.enable_xformers_memory_efficient_attention:
     #     if is_xformers_available():
@@ -522,27 +531,29 @@ def main():
 
     # lora_layers = filter(lambda p: p.requires_grad, unet.parameters())
             
-    # Set correct lora layers
-    lora_attn_procs = {}
-    for name in unet.attn_processors.keys():
-        cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
-        if name.startswith("mid_block"):
-            hidden_size = unet.config.block_out_channels[-1]
-        elif name.startswith("up_blocks"):
-            block_id = int(name[len("up_blocks.")])
-            hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
-        elif name.startswith("down_blocks"):
-            block_id = int(name[len("down_blocks.")])
-            hidden_size = unet.config.block_out_channels[block_id]
+    # [FIX] COMMENT OUT OR DELETE THIS WHOLE BLOCK
+    # # Set correct lora layers
+    # lora_attn_procs = {}
+    # for name in unet.attn_processors.keys():
+    #     cross_attention_dim = None if name.endswith("attn1.processor") else unet.config.cross_attention_dim
+    #     if name.startswith("mid_block"):
+    #         hidden_size = unet.config.block_out_channels[-1]
+    #     elif name.startswith("up_blocks"):
+    #         block_id = int(name[len("up_blocks.")])
+    #         hidden_size = list(reversed(unet.config.block_out_channels))[block_id]
+    #     elif name.startswith("down_blocks"):
+    #         block_id = int(name[len("down_blocks.")])
+    #         hidden_size = unet.config.block_out_channels[block_id]
 
-        lora_attn_procs[name] = LoRAAttnProcessor(
-            hidden_size=hidden_size,
-            cross_attention_dim=cross_attention_dim,
-            rank=args.rank,
-        )
+    #     lora_attn_procs[name] = LoRAAttnProcessor(
+    #         hidden_size=hidden_size,
+    #         cross_attention_dim=cross_attention_dim,
+    #         rank=args.rank,
+    #     )
 
-    unet.set_attn_processor(lora_attn_procs)
-    lora_layers = AttnProcsLayers(unet.attn_processors)
+    # unet.set_attn_processor(lora_attn_procs)
+    # lora_layers = AttnProcsLayers(unet.attn_processors)
+    # [END OF FIX] COMMENT OUT OR DELETE THIS WHOLE BLOCK
 
     if args.gradient_checkpointing:
         unet.enable_gradient_checkpointing()
@@ -570,13 +581,29 @@ def main():
     else:
         optimizer_cls = torch.optim.AdamW
 
+    # [FIX] COMMENT OUT THIS FIRST OPTIMIZER CREATION (Around Line 563)
+    # optimizer = optimizer_cls(
+    #     lora_layers.parameters(),
+    #     lr=args.learning_rate,
+    #     betas=(args.adam_beta1, args.adam_beta2),
+    #     weight_decay=args.adam_weight_decay,
+    #     eps=args.adam_epsilon,
+    # )
+    # [END OF FIX] COMMENT OUT THIS FIRST OPTIMIZER CREATION (Around Line 563)
+
+    # [FIX] Create the optimizer correctly using PEFT parameters
+    params_to_optimize = list(filter(lambda p: p.requires_grad, unet.parameters()))
+    if args.train_text_encoder:
+        params_to_optimize = params_to_optimize + list(filter(lambda p: p.requires_grad, text_encoder.parameters()))
+
     optimizer = optimizer_cls(
-        lora_layers.parameters(),
+        params_to_optimize,
         lr=args.learning_rate,
         betas=(args.adam_beta1, args.adam_beta2),
         weight_decay=args.adam_weight_decay,
         eps=args.adam_epsilon,
     )
+    # [END OF FIX] Create the optimizer correctly using PEFT parameters
 
     # Get the datasets: you can either provide your own training and evaluation files (see below)
     # or specify a Dataset from the hub (the dataset will be downloaded automatically from the datasets Hub).
@@ -828,8 +855,11 @@ def main():
                 # Backpropagate
                 accelerator.backward(loss)
                 if accelerator.sync_gradients:
-                    params_to_clip = lora_layers.parameters()
-                    accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+                    # [FIX] Use the optimizer's param groups or the params list we created
+                    # params_to_clip = lora_layers.parameters()
+                    # accelerator.clip_grad_norm_(params_to_clip, args.max_grad_norm)
+                    accelerator.clip_grad_norm_(params_to_optimize, args.max_grad_norm)
+                    # [END OF FIX] Use the optimizer's param groups or the params list we created
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
