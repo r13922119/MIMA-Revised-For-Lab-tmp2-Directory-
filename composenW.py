@@ -23,6 +23,11 @@ import pdb
 def gdupdateWexact(K, Ktarget1, Vtarget1, W, lam=None, device='cuda'):
     input_ = K # C_reg
     C = input_.T@input_ # C_reg.T @ C_reg
+
+    # [FIX] Add regularization term (Ridge Regression) to make C invertible
+    if lam is not None and lam > 0:
+        C += lam * torch.eye(C.shape[0], device=C.device)
+    
     d = []
     lu, piv = lu_factor(C)
     for i in range(Ktarget1.size(0)):
