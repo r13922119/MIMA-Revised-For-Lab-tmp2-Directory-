@@ -1,14 +1,62 @@
 [
     {
+        "instance_prompt": "photo of a cassette player",
+        "class_prompt": "object",
+        "instance_data_dir": "./data/cassette_player",
+        "class_data_dir": "./regularization/object"
+    },
+    {
+        "instance_prompt": "photo of a chain saw",
+        "class_prompt": "object",
+        "instance_data_dir": "./data/chain_saw",
+        "class_data_dir": "./regularization/object"
+    },
+    {
         "instance_prompt": "photo of a church",
         "class_prompt": "object",
         "instance_data_dir": "./data/church",
         "class_data_dir": "./regularization/object"
     },
     {
+        "instance_prompt": "photo of a english springer",
+        "class_prompt": "object",
+        "instance_data_dir": "./data/english_springer",
+        "class_data_dir": "./regularization/object"
+    },
+    {
+        "instance_prompt": "photo of a french horn",
+        "class_prompt": "object",
+        "instance_data_dir": "./data/french_horn",
+        "class_data_dir": "./regularization/object"
+    },
+    {
+        "instance_prompt": "photo of a garbage truck",
+        "class_prompt": "object",
+        "instance_data_dir": "./data/garbage_truck",
+        "class_data_dir": "./regularization/object"
+    },
+    {
+        "instance_prompt": "photo of a gas pump",
+        "class_prompt": "object",
+        "instance_data_dir": "./data/gas_pump",
+        "class_data_dir": "./regularization/object"
+    },
+    {
+        "instance_prompt": "photo of a golf ball",
+        "class_prompt": "object",
+        "instance_data_dir": "./data/golf_ball",
+        "class_data_dir": "./regularization/object"
+    },
+    {
         "instance_prompt": "photo of a parachute",
         "class_prompt": "object",
         "instance_data_dir": "./data/parachute",
+        "class_data_dir": "./regularization/object"
+    },
+    {
+        "instance_prompt": "photo of a tench",
+        "class_prompt": "object",
+        "instance_data_dir": "./data/tench",
         "class_data_dir": "./regularization/object"
     }
 ]
