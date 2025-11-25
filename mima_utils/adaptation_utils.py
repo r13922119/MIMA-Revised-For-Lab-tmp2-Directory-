@@ -8,9 +8,19 @@ from torchvision import transforms
 from diffusers import DiffusionPipeline
 
 def load_imma_pro_ckpt(unet, imma_ckpt):
-    print("restroting from trained IMMA pro weights")
+    print("restoring from trained IMMA pro weights")
     model_dict = unet.state_dict()
-    model_dict.update(torch.load(imma_ckpt))
+    
+    # Load the checkpoint from file
+    loaded_ckpt = torch.load(imma_ckpt, map_location="cpu") # Good practice to load to CPU first
+    
+    # [FIX] Handle Nested Dictionary (MIMA format) vs Flat Dictionary
+    if "unet" in loaded_ckpt:
+        delta_weights = loaded_ckpt["unet"]
+    else:
+        delta_weights = loaded_ckpt
+        
+    model_dict.update(delta_weights)
     unet.load_state_dict(model_dict)
 
 def log_validation(
