@@ -11,6 +11,7 @@ from diffusers.pipelines.stable_diffusion_xl import StableDiffusionXLPipeline
 from diffusers.pipelines.stable_diffusion.safety_checker import StableDiffusionSafetyChecker
 from diffusers.models.attention import Attention
 from diffusers.utils.import_utils import is_xformers_available
+from diffusers.configuration_utils import FrozenDict
 
 import pdb
 
@@ -182,7 +183,9 @@ class MIMAPipeline(StableDiffusionPipeline):
         modifier_token: list of new modifier tokens added or to be added to text_encoder
         modifier_token_id: list of id of new modifier tokens added or to be added to text_encoder
     """
-    _optional_components = ["safety_checker", "feature_extractor", "modifier_token"]
+    # FIX: Removed "modifier_token" (it's config, not a component)
+    # FIX: Support "image_encoder" (it is a component)
+    _optional_components = ["safety_checker", "feature_extractor", "image_encoder"]
 
     def __init__(
         self,
@@ -196,6 +199,7 @@ class MIMAPipeline(StableDiffusionPipeline):
         requires_safety_checker: bool = True,
         modifier_token: list = [],
         modifier_token_id: list = [],
+        image_encoder = None, # FIX: Support image_encoder
     ):
         super().__init__(vae,
                          text_encoder,
@@ -206,6 +210,12 @@ class MIMAPipeline(StableDiffusionPipeline):
                          feature_extractor,
                          requires_safety_checker=requires_safety_checker)
 
+        # FIX: Register image_encoder as a module (so .to(cuda) works)
+        self.register_modules(image_encoder=image_encoder)
+
+        # FIX: Register modifier tokens as CONFIG, not modules
+        self.register_to_config(modifier_token=modifier_token, modifier_token_id=modifier_token_id)
+
         # change attn class
         self.modifier_token = modifier_token
         self.modifier_token_id = modifier_token_id
@@ -215,11 +225,11 @@ class MIMAPipeline(StableDiffusionPipeline):
         for modifier_token_, initializer_token_ in zip(self.modifier_token, initializer_token):
             # Add the placeholder token in tokenizer
             num_added_tokens = self.tokenizer.add_tokens(modifier_token_)
+            
+            # FIX: Do not crash if num_added_tokens == 0, just pass
             if num_added_tokens == 0:
-                raise ValueError(
-                    f"The tokenizer already contains the token {modifier_token_}. Please pass a different"
-                    " `modifier_token` that is not already in the tokenizer."
-                )
+                pass 
+                # Original File raised ValueError here.
 
             # Convert the initializer_token, placeholder_token to ids
             token_ids = self.tokenizer.encode([initializer_token_], add_special_tokens=False)
@@ -238,37 +248,77 @@ class MIMAPipeline(StableDiffusionPipeline):
             token_embeds[x] = token_embeds[y]
 
     def save_pretrained(self, save_path, query_weight="attn2"):
+            # Create a dictionary to hold all necessary data
             delta_dict = {}
+            
+            # 1. Save the Delta Weights (Attention layers)
+            unet_weights = {}
             for name, params in self.unet.named_parameters():
                 if 'attn2' in name:
-                    delta_dict[name] = params.cpu().clone()
+                    unet_weights[name] = params.cpu().clone()
+            delta_dict['unet'] = unet_weights
+
+            # 2. Save Modifier Tokens (if they exist)
+            # This allows the model to remember the specific tokens you trained
+            if hasattr(self, 'modifier_token') and self.modifier_token:
+                token_dict = {}
+                # We need the embeddings for these tokens
+                token_embeds = self.text_encoder.get_input_embeddings().weight.data
+                
+                for token in self.modifier_token:
+                    # Get the ID
+                    ids = self.tokenizer.convert_tokens_to_ids(token)
+                    # Get the vector
+                    token_dict[token] = token_embeds[ids].cpu().clone()
+                
+                delta_dict['modifier_token'] = token_dict
+
+            # 3. Save as a SINGLE file (matches train.py expectation)
             torch.save(delta_dict, save_path)
 
     def load_model(self, save_path, compress=False):
         st = torch.load(save_path)
+        
+        # FIX: Detect structure (Flat vs Nested)
+        if 'unet' in st:
+            unet_state = st['unet']
+        else:
+            unet_state = st
+
         if 'text_encoder' in st:
             self.text_encoder.load_state_dict(st['text_encoder'])
         if 'modifier_token' in st:
-            modifier_tokens = list(st['modifier_token'].keys())
+            # FIX: Handle config dict vs direct list
+            if isinstance(st['modifier_token'], dict):
+                modifier_tokens = list(st['modifier_token'].keys())
+                token_values = st['modifier_token']
+            else:
+                # FIX: Fallback if structure is different, though previous code implied dict
+                modifier_tokens = st['modifier_token']
+                token_values = None
+
             modifier_token_id = []
             for modifier_token in modifier_tokens:
                 num_added_tokens = self.tokenizer.add_tokens(modifier_token)
                 if num_added_tokens == 0:
-                    raise ValueError(
-                        f"The tokenizer already contains the token {modifier_token}. Please pass a different"
-                        " `modifier_token` that is not already in the tokenizer."
-                    )
+                    pass # FIX: Do not crash if num_added_tokens == 0, just pass.  Original File raised ValueError here.
                 modifier_token_id.append(self.tokenizer.convert_tokens_to_ids(modifier_token))
             # Resize the token embeddings as we are adding new special tokens to the tokenizer
             self.text_encoder.resize_token_embeddings(len(self.tokenizer))
-            token_embeds = self.text_encoder.get_input_embeddings().weight.data
-            for i, id_ in enumerate(modifier_token_id):
-                token_embeds[id_] = st['modifier_token'][modifier_tokens[i]]
+            
+            if token_values:
+                token_embeds = self.text_encoder.get_input_embeddings().weight.data
+                for i, id_ in enumerate(modifier_token_id):
+                    token_embeds[id_] = token_values[modifier_tokens[i]]
 
         for name, params in self.unet.named_parameters():
             if 'attn2' in name:
+                # FIX: [HYBRID LOGIC] 
+                # 1. Use the original logic for Matrix Decomposition (compress=True)
+                # 2. Use the 'unet_state' variable to handle structure robustly
                 if compress and ('to_k' in name or 'to_v' in name):
-                    params.data += st['unet'][name]['u']@st['unet'][name]['v']
-                elif name in st['unet']:
-                    params.data.copy_(st['unet'][f'{name}'])
-
+                    if name in unet_state:
+                        params.data += unet_state[name]['u']@unet_state[name]['v']
+                # FIX: Standard robust loading
+                elif name in unet_state:
+                    params.data.copy_(unet_state[f'{name}'])
