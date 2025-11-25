@@ -18,7 +18,7 @@ sys.path.append('./')
 from model_pipeline import MIMAPipeline
 from diffusers import StableDiffusionPipeline, UNet2DConditionModel
 
-def sample(ckpt, delta_ckpt, from_file, prompt, compress, batch_size, outdir, num_inference_steps, guidance_scale, eta, freeze_model, sdxl=False):
+def sample(ckpt, delta_ckpt, from_file, prompt, compress, batch_size, freeze_model, sdxl=False, outdir=None, num_inference_steps=200, guidance_scale=6., eta=1., seed=42, no_panel=False): # default some values to the hardcoded value in the official repo
     model_id = ckpt
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
@@ -72,9 +72,15 @@ def sample(ckpt, delta_ckpt, from_file, prompt, compress, batch_size, outdir, nu
     # 2. Output Setup
     if outdir is None:
         outdir = os.path.dirname(delta_ckpt) if delta_ckpt else "samples"
-    os.makedirs(f'{outdir}/samples', exist_ok=True)
+
+    # Logic change: If no_panel is True, save directly to outdir. Otherwise, make 'samples' subdir.
+    if not no_panel:
+        os.makedirs(f'{outdir}/samples', exist_ok=True)
+    else:
+        os.makedirs(outdir, exist_ok=True)
     
-    generator = torch.Generator(device=device).manual_seed(42)
+    # Logic change: Use the passed seed instead of fixed 42
+    generator = torch.Generator(device=device).manual_seed(seed)
 
     # 3. Generation Logic
     prompts_to_run = []
@@ -91,19 +97,31 @@ def sample(ckpt, delta_ckpt, from_file, prompt, compress, batch_size, outdir, nu
         # Generate batch
         images = pipe([p]*batch_size, num_inference_steps=num_inference_steps, guidance_scale=guidance_scale, eta=eta, generator=generator).images
         
-        # Stitching (Panel View)
-        images_stitched = np.hstack([np.array(x) for x in images])
-        panel_image = Image.fromarray(images_stitched)
-        
-        # Safe Filename
+        # Safe Filename (Append seed to prevent overwrite)
         # takes only first 50 characters of prompt to name the image file
-        name = "".join([c for c in p[:50] if c.isalnum() or c in (' ', '-')]).strip().replace(' ', '-')
-        panel_image.save(f'{outdir}/{name}.png')
-        print(f"Saved panel to {outdir}/{name}.png")
+        safe_prompt = "".join([c for c in p[:50] if c.isalnum() or c in (' ', '-')]).strip().replace(' ', '-')
+        name = f"{safe_prompt}_seed{seed}"        
+        
+        if not no_panel:
+            # Default behavior: Stitch Panel + Save to subdir
+            # Stitching (Panel View)
+            images_stitched = np.hstack([np.array(x) for x in images])
+            panel_image = Image.fromarray(images_stitched)
+            
+            panel_image.save(f'{outdir}/{name}.png')
+            print(f"Saved panel to {outdir}/{name}.png")
 
-        # Save individual images
-        for i, im in enumerate(images):
-            im.save(f'{outdir}/samples/{name}_{i}.jpg')
+            # Save individual images
+            for i, im in enumerate(images):
+                im.save(f'{outdir}/samples/{name}_{i}.jpg')
+        
+        else:
+            # New behavior: No Panel + Save directly to outdir
+            for i, im in enumerate(images):
+                im.save(f'{outdir}/{name}_{i}.jpg')
+            
+        print(f"Saved {len(images)} images to {outdir}")
+
 
 
 def parse_args():
@@ -112,23 +130,26 @@ def parse_args():
                         type=str)
     parser.add_argument('--delta_ckpt', help='target string for query: path to checkpoint (delta or full)', default=None,
                         type=str)
-    parser.add_argument('--from-file', help='path to prompt file', default=None, # originally default to './'
+    parser.add_argument('--from-file', help='path to prompt file', default=None, # originally default to './' in the official repo
                         type=str)
     parser.add_argument('--prompt', help='prompt to generate', default=None,
                         type=str)
     parser.add_argument("--compress", action='store_true', help="Use for compressed (LoRA-style) MIMA checkpoints")
-    parser.add_argument("--output_dir", default=None, type=str, help="Directory to save images")
     parser.add_argument("--sdxl", action='store_true') # Unused but kept for compatibility
     parser.add_argument("--batch_size", default=5, type=int, help="Number of images per prompt")
     parser.add_argument('--freeze_model', help='crossattn or crossattn_kv', default='crossattn_kv',
                         type=str) # Unused but kept for compatibility
-    # Note: Default These To Official Repo Settings
-    parser.add_argument("--num_inference_steps", default=200, type=int)
-    parser.add_argument("--guidance_scale", default=6., type=float)
-    parser.add_argument("--eta", default=1., type=float)
+    # New arguments
+    parser.add_argument("--output_dir", default=None, type=str, help="Directory to save images")
+    parser.add_argument("--num_inference_steps", default=200, type=int) # default to the hardcoded value in the official repo, but we can use 50
+    parser.add_argument("--guidance_scale", default=6., type=float) # default to the hardcoded value in the official repo, but we can use 7.5
+    parser.add_argument("--eta", default=1., type=float) # default to the hardcoded value in the official repo
+    parser.add_argument("--seed", default=42, type=int, help="Random seed") # default to the hardcoded value in the official repo
+    parser.add_argument("--no_panel", action='store_true', help="If set, do not generate panel image and save individual images directly to output_dir")
+
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    sample(args.ckpt, args.delta_ckpt, args.from_file, args.prompt, args.compress, args.batch_size, args.output_dir, args.num_inference_steps, args.guidance_scale, args.eta, args.freeze_model, args.sdxl)
+    sample(args.ckpt, args.delta_ckpt, args.from_file, args.prompt, args.compress, args.batch_size, args.freeze_model, args.sdxl, args.output_dir, args.num_inference_steps, args.guidance_scale, args.eta, args.seed, args.no_panel)
