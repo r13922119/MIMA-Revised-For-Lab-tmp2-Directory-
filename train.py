@@ -652,7 +652,13 @@ def main(args):
     # add erasing checkpoint
     if args.delta_ckpt is not None:
         print("restroting from erased model from pre-training")
-        unet.load_state_dict(torch.load(args.delta_ckpt, map_location=accelerator.device))
+        delta_state = torch.load(args.delta_ckpt, map_location=accelerator.device)
+        
+        # FIX: Robust loading for both Flat (erase.py) and Nested (train.py) structures
+        if 'unet' in delta_state:
+            unet.load_state_dict(delta_state['unet'])
+        else:
+            unet.load_state_dict(delta_state)
 
     # Get a list of parameter group names for training
     param_names_to_optmize = args.param_names_to_optmize.split('+')
@@ -989,7 +995,7 @@ def main(args):
             # compose weights and update
             if is_inner:
                 # update xattn key and value
-                composed_weight = compose_in_train(unet, text_encoder, tokenizer, composed_weight_list, categories, float(args.lam))
+                composed_weight = compose_in_train(unet, text_encoder, tokenizer, composed_weight_list, categories, float(args.lam), device=accelerator.device) # FIX: adding device=accelerator.device
                 for name, params in unet.named_parameters():
                     if 'attn2.to_k' in name or 'attn2.to_v' in name:
                         new_param = composed_weight[name].to(accelerator.device)
