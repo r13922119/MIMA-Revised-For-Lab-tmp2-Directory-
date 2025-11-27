@@ -219,6 +219,12 @@ def parse_args(input_args=None):
         help="The output directory where the model predictions, checkpoints and validation generated images will be saved.",
     )
     parser.add_argument(
+        "--create_per_step_dir",
+        default=False,
+        action="store_true",
+        help="Save each checkpoint inside its respective step directory.",
+    )
+    parser.add_argument(
         "--lam",
         type=float,
         default=0.5,
@@ -1031,9 +1037,17 @@ def main(args):
                             modifier_token=args.modifier_token,
                             modifier_token_id=modifier_token_id,
                         )
-                        save_dir = os.path.join(args.output_dir, 'weights', args.param_names_to_optmize+"_"+args.imma_param_names_to_optmize, "adam" if args.lam == 0.5 else "lam_"+str(args.lam))
-                        os.makedirs(save_dir, exist_ok=True)
-                        save_path = os.path.join(save_dir, f"imma_pro_ckpt-lr{args.learning_rate_outer}-{global_step}.pt")
+                        # Base directory (adam)
+                        base_save_dir = os.path.join(args.output_dir, 'weights', args.param_names_to_optmize+"_"+args.imma_param_names_to_optmize, "adam" if args.lam == 0.5 else "lam_"+str(args.lam))
+                        os.makedirs(base_save_dir, exist_ok=True)
+                        if args.create_per_step_dir:
+                            # Create 'step-XXX' subfolder
+                            step_save_dir = os.path.join(base_save_dir, f"step-{global_step}")
+                            os.makedirs(step_save_dir, exist_ok=True)
+                            # Save inside the subfolder
+                            save_path = os.path.join(step_save_dir, f"imma_pro_ckpt-lr{args.learning_rate_outer}-{global_step}.pt")
+                        else:
+                            save_path = os.path.join(base_save_dir, f"imma_pro_ckpt-lr{args.learning_rate_outer}-{global_step}.pt")
                         pipeline.save_pretrained(save_path)
 
             logs = {"loss": loss.detach().item(), "lr": lr_scheduler_inner.get_last_lr()[0]}
