@@ -23,11 +23,6 @@ import pdb
 def gdupdateWexact(K, Ktarget1, Vtarget1, W, lam=None, device='cuda'):
     input_ = K # C_reg
     C = input_.T@input_ # C_reg.T @ C_reg
-
-    # [FIX] Add numerical stability term (fixed small epsilon 1e-6) to make C invertible
-    stability_epsilon = 1e-6
-    C += stability_epsilon * torch.eye(C.shape[0], device=C.device)
-    
     d = []
     lu, piv = lu_factor(C)
     for i in range(Ktarget1.size(0)):
